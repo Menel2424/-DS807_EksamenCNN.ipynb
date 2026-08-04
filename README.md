@@ -1,4 +1,4 @@
-CNN
+# CNN
 # DS807 Exam – CNN (Problem 1)
 
 This repository contains a Jupyter notebook (`DS807_EksamenCNN-4.ipynb`) with the answer to Problem 1, questions 2 and 3, for the DS807 course. The assignment covers image classification of satellite images (EuroSAT) using a CNN-based model (ResNet50), followed by an analysis of the model's interpretability and robustness.
