@@ -1,4 +1,3 @@
-# -DS807_EksamenCNN.ipynb
 CNN
 # DS807 Exam – CNN (Problem 1)
 
