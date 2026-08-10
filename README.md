@@ -1,92 +1,119 @@
-# DS807 Exam – CNN (Problem 1, Questions 2 & 3)
+# DS807 – Problem 1: Land Use and Land Cover Classification (Deep Learning)
 
-This repository contains **two versions** of the same exam assignment (Problem 1, questions 2 and 3, DS807), each using a different pre-trained CNN backbone for transfer learning on the EuroSAT satellite image dataset:
+This repo contains two notebooks answering **Question 2** and **Question 3** of Problem 1
+("Land Use and Land Cover Classification") from the DS807 exam (Winter 25/26). The task is to
+classify satellite images from the **EuroSAT** dataset (10 classes, e.g. Forest, Highway,
+Residential, River, SeaLake, etc.) using CNNs, and then analyze and interpret the models.
 
-| File | Backbone | Notes |
+## File overview
+
+| File | Content | Answers |
 |---|---|---|
-| `DS807_EksamenCNN_ResNet50.ipynb` | **ResNet50** | Preprocessing done explicitly with `preprocess_input` before training; VAE trained via a custom `train_step`; robustness tested against both Gaussian noise **and** blur. |
-| `DS807_CNN_P1_Q2_Q3-2.ipynb` | **EfficientNetB0** | Resizing and preprocessing done *inside* the model graph; VAE loss added via a custom `add_loss` layer; robustness tested against Gaussian noise only, with a more detailed sweep (11 noise levels). |
+| `DS807_P1_Q2_Q3_CNN.ipynb` | EfficientNetB0 model (224×224), latent space analysis (PCA vs. VAE), Grad-CAM and robustness test | Question 2.1, 2.3 and 3 |
+| `DS807_P1_Q2_Efficientnet.ipynb` | Comparison of EfficientNetB0 (64×64) vs. EfficientNetB5 (224×224) | Question 2.2 (model scaling) |
 
-Both notebooks answer the same three sub-questions and follow the same overall pipeline, so this README describes the shared structure once and calls out the differences between the two versions where relevant.
+Both notebooks are written to run in **Google Colab** (they use `google.colab.drive` to save
+models to Google Drive).
 
-## Assignment overview
+---
 
-Both notebooks cover:
+## Data
 
-1. **Question 2 – Classification model (CNN)**: Build, train, fine-tune, and evaluate a transfer-learning image classifier on EuroSAT.
-2. **Question 2.3 – Latent space investigation**: Compare a supervised approach (PCA on CNN features) with an unsupervised approach (a Variational Autoencoder) for reducing the data to a 2D latent space.
-3. **Question 3 – Model interpretability and robustness**: Use Grad-CAM to visualize what the model focuses on, and test how classification accuracy degrades under image corruption (noise / blur).
+- **Source:** EuroSAT (RGB) loaded via Hugging Face `datasets`: `load_dataset("nielsr/eurosat-demo")`.
+- **Classes (10):** `industrial_buildings, residential_buildings, annual_crop, permanent_crop,
+  river, sea_lake, herbaceous_vegetation, highway, pasture, forest`.
+- **Split:** Data is split in two steps using `train_test_split` (stratified on label,
+  `random_state=42`):
+  1. 80 % train+val / 20 % test
+  2. Of the 80 %: 80 % train / 20 % val
 
-### Data
-- **Dataset**: `nielsr/eurosat-demo`, loaded via Hugging Face `datasets`.
-- **Classes** (10): `industrial_buildings`, `residential_buildings`, `annual_crop`, `permanent_crop`, `river`, `sea_lake`, `herbaceous_vegetation`, `highway`, `pasture`, `forest`.
-- **Split**: 64% train / 16% validation / 20% test (stratified by class, `random_state=42`) in both notebooks.
+  Result: **64 % train / 16 % validation / 20 % test**.
+- Images are originally **64×64×3**. Resizing to the model's expected input size (e.g. 224×224 for
+  EfficientNetB0/B5) happens **inside the model** (`tf.keras.layers.Resizing`), so the raw data
+  stays at 64×64 and augmentation/normalization is handled consistently across train/val/test.
 
-### Question 2 – Classification model
-- Both notebooks use **transfer learning**: a frozen, ImageNet-pretrained backbone, a `GlobalAveragePooling2D` layer, a `Dense(128)` "feature vector" layer, `Dropout(0.3)`, and a softmax output layer over the 10 classes.
-- **Two-stage training** in both:
-  1. **Baseline**: backbone fully frozen, only the new head is trained.
-  2. **Fine-tuning**: the last 30 layers of the backbone are unfrozen and trained further at a lower learning rate.
-- **Callbacks**: `EarlyStopping` (patience 5, restores best weights) and `ModelCheckpoint` (saves best model by `val_loss`) in both.
-- **Evaluation**: test accuracy/loss, classification report, confusion matrix, and loss/accuracy curves for both training stages, in both notebooks.
-- **Key difference**: the ResNet50 version explicitly preprocesses images with `preprocess_input` before feeding the model; the EfficientNetB0 version resizes and preprocesses images *inside* the model (as part of the computation graph), so raw images are passed directly to `.fit()`.
+---
 
-### Question 2.3 – PCA vs. VAE
-- **Approach A (supervised)**: Features are extracted from the trained CNN's `feature_vector` layer and reduced to 2D with PCA; the result is visualized per class for train and validation data. Identical logic in both notebooks.
-- **Approach B (unsupervised)**: A convolutional Variational Autoencoder (encoder/decoder architecture, 2D latent space) is trained from scratch directly on the raw images, without using any labels. The resulting latent space is then visualized per class (for comparison only — the VAE itself never sees the labels).
-- **Key difference**: the ResNet50 notebook implements the VAE as a custom `tf.keras.Model` subclass with a hand-written `train_step`/`test_step` that computes reconstruction loss + KL divergence. The EfficientNetB0 notebook instead wraps the reconstruction + KL loss computation in a custom `VAELossLayer` and adds it to the model via `add_loss`, letting the standard `.fit()` / `.compile()` handle training without a custom loop.
+## `DS807_P1_Q2_Q3_CNN.ipynb`
 
-### Question 3 – Interpretability and robustness
-- **Grad-CAM**: Both notebooks implement Grad-CAM to visualize which regions of an image drive the model's prediction, illustrated on the `highway` and `river` classes.
-  - The ResNet50 version builds separate sub-models to extract intermediate outputs and computes gradients with respect to the last convolutional block (`conv5_block3_out`) of the ResNet50 backbone.
-  - The EfficientNetB0 version instead rebuilds the entire forward pass (resizing → preprocessing → augmentation → backbone → classification head) as a single computation graph in one function (`compute_gradcam`), specifically to avoid disconnected-gradient issues that can occur when re-using pre-built sub-models.
-- **Robustness testing**:
-  - The ResNet50 version tests robustness against **both Gaussian noise** (σ = 0, 15, 30, 45, 60) **and Gaussian blur** (σ = 0, 1, 2, 3, 4), tracking both overall and per-class accuracy, and reports the most fragile classes for each corruption type.
-  - The EfficientNetB0 version tests robustness against **Gaussian noise only**, but with a finer sweep across 11 noise levels (σ from 0 to 50), plotting overall test accuracy against noise level.
+### Part 1 – Question 2.1: CNN training and model selection
+- **Architecture:** Transfer learning with **EfficientNetB0** (ImageNet weights), input resized to 224×224.
+- **Data augmentation:** Random horizontal flip, rotation (±5 %), zoom (±10 %).
+- **Two-stage training:**
+  1. **Baseline:** Base model frozen, only the new classification head is trained (Dense 128 →
+     Dropout 0.3 → softmax over 10 classes). Adam, lr = 1e-4, up to 50 epochs.
+  2. **Fine-tuning:** The last 30 layers of EfficientNetB0 are unfrozen and trained further. Adam,
+     lr = 1e-4, up to 15 epochs.
+- **Model selection:** `EarlyStopping` (monitor = `val_loss`, patience = 5,
+  `restore_best_weights=True`) combined with `ModelCheckpoint` (saves the best model based on
+  `val_loss`) — i.e. minimum validation loss is used as the stopping criterion/checkpoint metric,
+  not maximum validation accuracy.
+- **Evaluation:** Test accuracy/loss, `classification_report` (precision/recall/F1 per class) and
+  confusion matrix (heatmap) on the test set.
 
-## Requirements
+### Part 2 – Question 2.3: Latent Space (PCA vs. VAE)
+- **Approach A (supervised):** Features are extracted from the trained CNN's penultimate layer
+  (`feature_vector`, 128-dim), reduced to 2D with PCA, and plotted colored by class (train + val).
+- **Approach B (unsupervised):** A **Variational Autoencoder (VAE)** is built and trained from
+  scratch using only the images (labels are ignored):
+  - Encoder: 3× Conv2D (32/64/128 filters, stride 2) → Dense(256) → `z_mean`/`z_log_var` (latent
+    dim = 2) → sampling layer (reparameterization trick).
+  - Decoder: Dense → reshape → 3× Conv2DTranspose (upsampling) → sigmoid output.
+  - Loss: reconstruction loss (binary crossentropy) + KL divergence, implemented via a custom
+    `VAELossLayer` (`add_loss`).
+  - Trained for 30 epochs on normalized images (0–1).
+  - The 2D latent representations (`z_mean`) for train/val are plotted colored by class, so they
+    can be directly compared with the PCA plot from Approach A.
 
-Both notebooks are written to run in **Google Colab** (they use `google.colab.drive` to save trained models to Google Drive). Required packages:
+### Part 3 – Question 3: Interpretability and robustness
+- **Grad-CAM:** Custom implementation (`compute_gradcam`) that runs a single forward pass through
+  resizing → preprocessing → augmentation → EfficientNetB0 backbone → pooling → classification
+  head, and uses `GradientTape` to compute gradients of the class score with respect to the
+  feature maps. Heatmaps are overlaid on the original image for examples from the **River** and
+  **Highway** classes.
+- **Robustness test (noise):** Gaussian noise is added to the test images' pixel values with
+  increasing standard deviation (σ from 0 to 50 in 11 steps), and the model's accuracy is measured
+  at each noise level. The result is plotted as accuracy vs. σ to investigate whether the model
+  degrades gradually or collapses suddenly.
 
-```
-tensorflow
-numpy
-matplotlib
-scikit-learn
-seaborn
-datasets   # Hugging Face
-```
+---
 
-Installation (if not using Colab):
-```bash
-pip install tensorflow numpy matplotlib scikit-learn seaborn datasets
-```
+## `DS807_P1_Q2_Efficientnet.ipynb`
 
-## How to run
+Answers **Question 2.2 (Model Scaling)** by comparing two EfficientNet variants that differ in
+both depth/width (model size) and resolution:
 
-For **either** notebook:
+| | Model | Input resolution | Baseline optimizer | Fine-tune optimizer |
+|---|---|---|---|---|
+| Cell 1 | **EfficientNetB0** | 64×64 | Adam, lr = 1e-3 | Adam, lr = 1e-4 |
+| Cell 2 | **EfficientNetB5** | 224×224 | Adam, lr = 1e-3 | Adam, lr = 1e-4 |
 
-1. Open it in Google Colab (recommended) or Jupyter.
-2. Run the **Question 2** cell(s) first — this mounts Google Drive, loads and splits the data, and builds/trains/evaluates the baseline and fine-tuned classification model.
-3. Run the **Question 2.3** cell(s) next — this depends on the trained model and data variables from step 2, and produces the PCA and VAE latent-space visualizations.
-4. Run the **Question 3** cell(s) last — this depends on the trained model and test data from step 2, and produces the Grad-CAM visualizations and the robustness (noise/blur) plots.
+Both follow the same recipe as in the CNN notebook (frozen base → 15 epochs of fine-tuning on the
+last 30 layers, same augmentation, same `EarlyStopping`/`ModelCheckpoint` strategy, same
+evaluation with classification report and confusion matrix). The purpose is to discuss the
+trade-off between model size/resolution (parameters, training time) and performance, with
+reference to the EfficientNet paper's compound scaling principle (Tan & Le, 2019).
 
-> **Note**: Cells must be run in order within each notebook — later sections depend on variables (the trained model, data splits, class names) created in earlier sections.
+> **Note:** This file uses lr = 1e-3 in the baseline stage (vs. 1e-4 in `..._CNN.ipynb`), and in
+> the B0 cell the input stays at 64×64 (no resizing to 224×224), while the B0 model in the CNN
+> notebook is resized to 224×224. This is an intentional part of the scaling experiment
+> (resolution as a variable), but is worth stating explicitly in the report so the methodology is
+> transparent.
 
-## Saved models
+---
 
-Both notebooks save the best model weights (by lowest `val_loss`) to Google Drive at `/content/drive/MyDrive/models`:
+## Running the notebooks
 
-- ResNet50 version: `resnet50_baseline.keras`, `resnet50_finetuned.keras`
-- EfficientNetB0 version: `EFFICIENTNETB0_baseline.keras`, `EFFICIENTNETB0_finetuned.keras`
+1. Open the notebook in **Google Colab**.
+2. Run the first cell — it will request access to Google Drive (`drive.mount`) and create
+   `/content/drive/MyDrive/models`, where trained models (`.keras` files) are saved automatically
+   via `ModelCheckpoint`.
+3. Required packages (already in Colab): `tensorflow`, `numpy`, `matplotlib`, `scikit-learn`,
+   `seaborn`, `datasets` (Hugging Face).
+4. Run the cells in order — each markdown heading corresponds to an exam question/sub-question.
 
-## Output / results
+## Hardware note
 
-Both notebooks produce:
-- Sample training images with class labels
-- Model architecture summary
-- Training/validation loss and accuracy curves for the baseline and fine-tuned model
-- Classification report and confusion matrix on the test set
-- 2D latent-space visualizations comparing supervised PCA vs. unsupervised VAE
-- Grad-CAM heatmaps for selected classes (`highway`, `river`)
-- Robustness plots showing how test accuracy degrades under image corruption (noise in both; noise + blur in the ResNet50 version)
+Training EfficientNetB5 at 224×224 as well as the VAE is computationally heavy. Use a GPU runtime
+in Colab (Runtime → Change runtime type → GPU). Batch size defaults to 32; reduce it if you run
+into memory issues.
